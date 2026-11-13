@@ -1,5 +1,5 @@
 // Offline support: cache the app files; use the network first so updates arrive.
-const CACHE = 'rakaat-v1';
+const CACHE = 'rakaat-v2';
 const FILES = ['./', 'index.html', 'app.js', 'manifest.webmanifest', 'keepawake.mp4', 'lib/face-api.js',
   'models/tiny_face_detector_model-weights_manifest.json', 'models/tiny_face_detector_model.bin',
   'icons/icon-192.png', 'icons/apple-touch-icon.png'];

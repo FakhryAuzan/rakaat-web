@@ -17,6 +17,7 @@ const DEFAULT_PROFILE = { primary: 'face', faceRuku: 0.12, faceRukuRate: 0.5, fa
 const DEFAULTS = {
   startDelay: 5, statusLight: true, warnMistakes: true, missedRuku: 'yellow', completion: 'beep',
   theme: 'system', glow: true, readout: false, prayerId: 'fajr', counts: {}, profile: null,
+  trackRuku: 'ask', tutorialSeen: false, tutorialEvery: false,
 };
 
 let S = loadSettings();
@@ -288,7 +289,7 @@ async function startSession() {
   setBusy(false);
   classifier = c;
   applyCounterSettings();
-  counter.rukuDetectable = c.rukuDetectable;
+  counter.rukuDetectable = c.rukuDetectable && S.trackRuku !== 'off';
   counter.resetMotion();
   Awake.on();
   c.beginBaseline();
@@ -359,7 +360,8 @@ function render() {
 
   $('dotRuku').classList.toggle('on', counter.rukuDone);
   $('indRuku').classList.toggle('na', !counter.rukuDetectable);
-  $('rukuLabel').textContent = counter.rukuDetectable ? 'Ruku' : 'Ruku (n/a)';
+  $('rukuLabel').textContent = S.trackRuku === 'off' ? 'Ruku (off)' : counter.rukuDetectable ? 'Ruku' : 'Ruku (n/a)';
+  if (state === 'idle') { counter.rukuDetectable = counter.rukuDetectable && S.trackRuku !== 'off'; $('indRuku').classList.toggle('na', !counter.rukuDetectable); }
   $('dotS1').classList.toggle('on', counter.sujoodInRakaat >= 1);
   $('dotS2').classList.toggle('on', counter.sujoodInRakaat >= 2);
   $('total').textContent = `Total sujood: ${counter.sujoodTotal}`;
@@ -429,6 +431,7 @@ function openSettings() {
   $('setGlow').checked = S.glow; $('setStatus').checked = S.statusLight; $('setWarn').checked = S.warnMistakes;
   $('setMissedRuku').value = S.missedRuku; $('setComplete').value = S.completion; $('setTheme').value = S.theme;
   $('setReadout').checked = S.readout;
+  $('setTrackRuku').value = S.trackRuku; $('setTutEvery').checked = S.tutorialEvery;
   $('calStatus').textContent = S.profile ? `Calibrated ✓ (${S.profile.primary === 'face' ? 'face' : 'brightness'} detection)` : 'Not calibrated';
   show('settingsSheet');
 }
@@ -441,6 +444,9 @@ function bindSettings() {
   $('setComplete').onchange = e => { S.completion = e.target.value; save(); unlockAudio(); if (S.completion === 'beep') beep(1); };
   $('setTheme').onchange = e => { S.theme = e.target.value; save(); applyTheme(); };
   $('setReadout').onchange = e => { S.readout = e.target.checked; save(); render(); };
+  $('setTrackRuku').onchange = e => { S.trackRuku = e.target.value; save(); if (S.trackRuku !== 'off') counter.rukuDetectable = true; render(); };
+  $('setTutEvery').onchange = e => { S.tutorialEvery = e.target.checked; save(); };
+  $('btnTutorial').onclick = () => openTutorial();
   $('btnCalibrate').onclick = () => { hide('settingsSheet'); openCalibration(); };
 }
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -451,7 +457,7 @@ function applyTheme() {
 }
 
 // ---------------- Calibration ----------------
-const Cal = { phase: 'ready', end: 0, last: null, samples: {}, timer: null, result: null };
+const Cal = { phase: 'ready', end: 0, last: null, samples: {}, timer: null, result: null, full: true };
 
 function openCalibration() {
   if (state !== 'idle') stopSession();
@@ -461,12 +467,18 @@ function openCalibration() {
 function calReady() {
   Cal.phase = 'ready'; clearInterval(Cal.timer);
   $('calTitle').textContent = 'Calibrate';
+  const rukuLine = S.trackRuku === 'on' ? '   • 2 beeps: go into ruku and hold\n'
+    : S.trackRuku === 'off' ? '' : '   • 2 beeps: go into ruku and hold (only if you choose to track ruku)\n';
   $('calBody').textContent =
-    '1. Put the phone on the mat exactly where it will be during prayer: screen up, just beyond where your forehead goes.\n' +
-    '2. Tap Begin and stand in your place. You have 5 seconds.\n' +
+    '1. Put the phone screen-up on the mat where your CHEST will be in sujood (green in the picture). Keep the forehead spot (red) clear.\n' +
+    '2. Tap Begin and take your place: stand, or sit (iftirash). You have 5 seconds.\n' +
     '3. Follow the beeps (turn your volume up):\n' +
-    '   • 1 beep: stand still\n   • 2 beeps: go into ruku and hold\n   • 3 beeps: go into sujood and hold\n   • 1 long beep: done, you can get up\n\n' +
-    'Do this in the same light you usually pray in.';
+    '   • 1 beep: stay still (standing or sitting)\n' + rukuLine +
+    '   • 3 beeps: go into sujood and hold\n   • 1 long beep: done, you can get up\n\n' +
+    'Do this in the same light you usually pray in.' +
+    (S.trackRuku === 'on' ? '\n\nRuku is included (change in Settings → Track ruku).'
+      : S.trackRuku === 'off' ? '\n\nSujood only, without ruku (change in Settings → Track ruku).' : '');
+  $('calIll').hidden = false;
   $('calTimer').textContent = '';
   $('calPreviewSpace').hidden = true; $('cam').classList.remove('preview');
   $('calMain').hidden = false; $('calMain').textContent = 'Begin'; $('calMain').disabled = false; $('calMain').onclick = calBegin;
@@ -474,6 +486,14 @@ function calReady() {
 }
 async function calBegin() {
   unlockAudio();
+  if (S.trackRuku === 'ask') {
+    const yes = await dialog('Measure ruku too?',
+      'Yes: full calibration (stand → ruku → sujood). The app can then show the ruku dot and warn when only 1 sujood is detected.\n\n' +
+      'No: quicker (stand or sit → sujood). Only sujood are tracked.\n\nYour choice is saved; change it anytime in Settings → Track ruku.',
+      'Yes, include ruku', 'No, sujood only');
+    S.trackRuku = yes ? 'on' : 'off'; save();
+  }
+  Cal.full = S.trackRuku === 'on';
   $('calMain').disabled = true; $('calMain').textContent = 'Starting…';
   try {
     await Cam.start(r => { Cal.last = r; });
@@ -486,7 +506,7 @@ async function calBegin() {
   Awake.on();
   if (S.glow) document.body.classList.add('glow');
   Cal.samples = {}; Cal.last = null; Cal.result = null;
-  $('cam').classList.add('preview'); $('calPreviewSpace').hidden = false;
+  $('cam').classList.add('preview'); $('calPreviewSpace').hidden = false; $('calIll').hidden = true;
   $('calMain').hidden = true;
   $('calSecondary').hidden = false; $('calSecondary').textContent = 'Cancel';
   $('calSecondary').onclick = () => { calStop(); calReady(); };
@@ -503,8 +523,11 @@ function calTick() {
   $('calTimer').textContent = Math.max(0, Math.ceil((Cal.end - t) / 1000));
   if (t < Cal.end) return;
   switch (Cal.phase) {
-    case 'prep': beep(1); calEnter('stand', 3000, 'Stand still', 'Measuring while you stand…'); break;
-    case 'stand': beep(2); calEnter('toRuku', 3000, 'Go into ruku', 'Bow and hold the position.'); break;
+    case 'prep': beep(1); calEnter('stand', 3000, 'Stay still', 'Measuring while you stand or sit…'); break;
+    case 'stand':
+      if (Cal.full) { beep(2); calEnter('toRuku', 3000, 'Go into ruku', 'Bow and hold the position.'); }
+      else { beep(3); calEnter('toSujood', 4000, 'Go into sujood', 'Prostrate and hold the position.'); }
+      break;
     case 'toRuku': calEnter('ruku', 3000, 'Hold ruku', 'Measuring ruku…'); break;
     case 'ruku': beep(3); calEnter('toSujood', 4000, 'Go into sujood', 'Prostrate and hold the position.'); break;
     case 'toSujood': calEnter('sujood', 3000, 'Hold sujood', 'Measuring sujood…'); break;
@@ -543,23 +566,69 @@ function calCompute() {
 
   const rukuRate = rate(ruku), rukuSize = size(ruku), sujoodRate = rate(sujood), sujoodSize = size(sujood);
   const lumaRuku = rel(ruku), lumaSujood = rel(sujood);
-  const numbers =
-    `Face seen: standing ${pct(rate(stand))}, ruku ${pct(rukuRate)}, sujood ${pct(sujoodRate)}\n` +
-    `Face size: ruku ${rukuSize.toFixed(2)}, sujood ${sujoodSize.toFixed(2)}\n` +
-    `Brightness change: ruku ${pct(lumaRuku)}, sujood ${pct(lumaSujood)}\n\n`;
+  const numbers = Cal.full
+    ? `Face seen: standing ${pct(rate(stand))}, ruku ${pct(rukuRate)}, sujood ${pct(sujoodRate)}\n` +
+      `Face size: ruku ${rukuSize.toFixed(2)}, sujood ${sujoodSize.toFixed(2)}\n` +
+      `Brightness change: ruku ${pct(lumaRuku)}, sujood ${pct(lumaSujood)}\n\n`
+    : `Face seen: standing/sitting ${pct(rate(stand))}, sujood ${pct(sujoodRate)}\n` +
+      `Face size in sujood: ${sujoodSize.toFixed(2)}\nBrightness change in sujood: ${pct(lumaSujood)}\n\n`;
 
   const faceOk = sujoodRate >= 0.5 && sujoodSize >= 0.1 && (rukuRate < 0.4 || sujoodSize >= 1.25 * rukuSize);
   const lumaOk = Math.abs(lumaSujood) >= 0.15;
   if (!faceOk && !lumaOk) {
-    return [false, numbers + "Couldn't see a clear difference in sujood. Make sure the phone is screen-up just beyond where your forehead goes, and your face is above it in sujood. In a dark room, keep \"Light up my face\" on."];
+    return [false, numbers + "Couldn't see a clear difference in sujood. Make sure the phone is screen-up under where your chest goes in sujood, with nothing covering its top edge. In a dark room, keep \"Light up my face\" on and the screen brightness up."];
   }
   const profile = { primary: faceOk ? 'face' : 'luma', faceRuku: rukuSize, faceRukuRate: rukuRate, faceSujood: sujoodSize, faceSujoodRate: sujoodRate, lumaRukuRel: lumaRuku, lumaSujoodRel: lumaSujood };
   Cal.result = profile;
   const rukuOk = new CameraClassifier(profile).rukuDetectable;
   return [true, numbers +
-    (faceOk ? 'Sujood: your face is clearly detected ✓' : "Sujood: detected from picture brightness ✓ (face wasn't clear enough)") + '\n' +
-    (rukuOk ? 'Ruku: detectable ✓' : "Ruku: not clear enough, so ruku won't be tracked (shown as n/a).")];
+    (faceOk ? 'Sujood: detected from your face ✓' : 'Sujood: detected from picture brightness ✓') + '\n' +
+    (!Cal.full ? 'Ruku: not measured (sujood only)' : rukuOk ? 'Ruku: detectable ✓' : "Ruku: not clear enough, so ruku won't be tracked (shown as n/a).")];
 }
+
+// ---------------- Tutorial ----------------
+const TUT = [
+  { ill: 'welcome', title: 'Welcome to Rakaat Counter',
+    body: 'It counts your rakaat by detecting each sujood with the front camera. Every 2 sujood = 1 rakaat.\n\nThis quick guide shows how to place the phone and set it up for accurate counts. You can skip it anytime and open it again from Settings.' },
+  { ill: 'place', title: 'Where to put the phone',
+    body: '• Screen up, flat on the mat.\n• Under where your chest will be in sujood, not where your forehead goes, so you never touch it.\n• Keep the top edge of the phone uncovered: the front camera is there.\n• Use the same spot every time you pray.' },
+  { ill: 'calibrate', title: 'Calibrate in the same spot',
+    body: 'Settings → Calibrate. It takes about 30 seconds.\n\n1. Put the phone on the mat where your chest goes in sujood (green).\n2. Tap Begin, then take your place (feet): stand, or sit in iftirash. Keep the forehead spot (red) clear.\n3. Follow the beeps (volume up): 1 = stay still, 2 = ruku, 3 = sujood, 1 long = done.\n\nRuku is optional: the app asks the first time (or set it in Settings → Track ruku). Without ruku it\'s quicker: just stay still, then sujood.\n\nCalibrate again if you change room, mat or lighting.' },
+  { ill: 'light', title: 'Best conditions',
+    body: 'Works in lit rooms and in the dark.\n\n• In a dark room, keep "Light up my face" on: the screen turns white while counting to light you up. Turn screen brightness up.\n• Avoid flickering light or sunlight that comes and goes.\n• Turn the volume up for the calibration beeps (the completion beep is optional).' },
+  { ill: 'screen', title: 'Reading the screen',
+    body: '• Big number: rakaat done, with the target below.\n• The ruku dot and 2 sujood dots fill as you pray each rakaat.\n• Status light: green = on track, yellow = unsure, red = possible wrong rakaat.\n• Reset starts a fresh count, e.g. a second set of Dhuha.\n\nTip: in Safari tap Share → Add to Home Screen to open it like an app.' },
+];
+let tutIndex = 0;
+function openTutorial() {
+  S.tutorialSeen = true; save();
+  tutIndex = 0; tutGo(0);
+  show('tutorial');
+}
+function tutGo(i) {
+  if (i < 0 || i >= TUT.length) return;
+  tutIndex = i;
+  const p = TUT[i];
+  $('tutIll').innerHTML = $('ill-' + p.ill).innerHTML;
+  $('tutTitle').textContent = p.title;
+  $('tutBody').textContent = p.body; $('tutBody').scrollTop = 0;
+  $('tutDots').innerHTML = TUT.map((_, d) => `<span class="${d === i ? 'on' : ''}"></span>`).join('');
+  $('tutBack').style.visibility = i === 0 ? 'hidden' : 'visible';
+  $('tutNext').textContent = i === TUT.length - 1 ? 'Done' : 'Next';
+}
+$('tutSkip').onclick = () => hide('tutorial');
+$('tutBack').onclick = () => tutGo(tutIndex - 1);
+$('tutNext').onclick = () => { if (tutIndex === TUT.length - 1) hide('tutorial'); else tutGo(tutIndex + 1); };
+(() => { // swipe between pages
+  let x0 = null, y0 = null;
+  $('tutCard').addEventListener('touchstart', e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+  $('tutCard').addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) tutGo(tutIndex + (dx < 0 ? 1 : -1));
+    x0 = null;
+  }, { passive: true });
+})();
 
 // ---------------- UI helpers ----------------
 function show(id) { $(id).hidden = false; }
@@ -603,6 +672,7 @@ bindSettings();
 applyTheme();
 applyCounterSettings();
 render();
+if (!S.tutorialSeen || S.tutorialEvery) openTutorial();
 
 // Preload the face model in the background, and register offline support.
 if (window.faceapi) Cam.loadModel().catch(() => {});
