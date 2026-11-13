@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Rakaat">
+<meta name="theme-color" content="#1F7A63">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<title>Rakaat Counter</title>
+<style>
+  :root {
+    --bg: #FAFAF8; --surface: #FFFFFF; --text: #1B1B1B; --muted: #6B6B6B; --line: #E4E4E0;
+    --brand: #1F7A63; --brand-text: #FFFFFF; --dot-off: #C8C8C8;
+    --green: #2E9E5B; --yellow: #E8B931; --red: #D64545;
+  }
+  html[data-theme="dark"] {
+    --bg: #121413; --surface: #1C1F1E; --text: #F2F2F2; --muted: #9AA19E; --line: #2C302E;
+    --brand: #6FD3B0; --brand-text: #0E2A22; --dot-off: #474B49;
+  }
+  /* White "glow" screen while counting, so the screen lights the face in dark rooms */
+  body.glow {
+    --bg: #FFFFFF; --surface: #FFFFFF; --text: #1B1B1B; --muted: #555; --line: #DDD;
+    --brand: #1F7A63; --brand-text: #FFFFFF; --dot-off: #CFCFCF;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+  body { -webkit-user-select: none; user-select: none; }
+  button { font: inherit; color: inherit; }
+  .app { display: flex; flex-direction: column; height: 100dvh;
+    padding: calc(env(safe-area-inset-top) + 8px) 16px calc(env(safe-area-inset-bottom) + 16px); }
+  .topbar { display: flex; justify-content: space-between; align-items: center; min-height: 52px; }
+  .prayer-btn { background: none; border: 0; font-size: 19px; font-weight: 600; padding: 10px 6px;
+    display: flex; align-items: center; gap: 4px; }
+  .icon-btn { background: none; border: 0; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 50%; }
+  .icon-btn svg, .prayer-btn svg { fill: var(--text); }
+  .center { display: flex; flex-direction: column; align-items: center; margin-top: 8px; }
+  .big { font-size: min(44vw, 200px); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+  .big.countdown { color: var(--brand); }
+  .big.over { color: var(--red); }
+  .target { color: var(--muted); font-size: 20px; margin-top: 2px; }
+  .state { font-size: 18px; font-weight: 700; margin-top: 6px; }
+  .indicators { display: flex; gap: 40px; margin-top: 22px; }
+  .ind { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+  .dots { display: flex; gap: 10px; }
+  .dot { width: 24px; height: 24px; border-radius: 50%; background: var(--dot-off); transition: background .15s; }
+  .dot.on { background: var(--green); }
+  .ind.na { opacity: .35; }
+  .total { color: var(--muted); font-size: 15px; margin-top: 12px; }
+  .status { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 28px; }
+  .status-dot { width: 36px; height: 36px; border-radius: 50%; background: var(--dot-off); flex: none;
+    box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 0%, transparent); }
+  .status-dot.green { background: var(--green); } .status-dot.yellow { background: var(--yellow); } .status-dot.red { background: var(--red); }
+  .status-text { font-size: 16px; max-width: 260px; }
+  .readout { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--muted); text-align: center; margin-top: 12px; min-height: 1em; }
+  .spacer { flex: 1; }
+  .buttons { display: flex; gap: 12px; }
+  .btn { flex: 1; height: 64px; border-radius: 32px; font-size: 19px; font-weight: 600; border: 0; }
+  .btn.primary { background: var(--brand); color: var(--brand-text); }
+  .btn.outline { background: transparent; border: 1.5px solid var(--line); color: var(--text); }
+  .btn:active { opacity: .8; }
+
+  /* Sheets (full-screen panels) */
+  .sheet { position: fixed; inset: 0; background: var(--bg); z-index: 10; display: flex; flex-direction: column;
+    padding: calc(env(safe-area-inset-top) + 8px) 16px calc(env(safe-area-inset-bottom) + 16px); }
+  .sheet[hidden] { display: none; }
+  .sheet-head { display: flex; align-items: center; gap: 4px; min-height: 52px; }
+  .sheet-head h2 { font-size: 20px; margin: 0; }
+  .sheet-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 12px; }
+  .group-title { font-size: 13px; font-weight: 700; color: var(--brand); text-transform: uppercase; letter-spacing: .04em; margin: 22px 4px 6px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 14px; border-top: 1px solid var(--line); min-height: 56px; }
+  .row:first-child { border-top: 0; }
+  .row .label { flex: 1; }
+  .row .label small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .row select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; max-width: 48%; }
+  .row input[type=range] { width: 100%; accent-color: var(--brand); }
+  .switch { position: relative; width: 50px; height: 30px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch span { position: absolute; inset: 0; background: var(--dot-off); border-radius: 15px; transition: .2s; }
+  .switch span::after { content: ""; position: absolute; width: 24px; height: 24px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+  .switch input:checked + span { background: var(--brand); }
+  .switch input:checked + span::after { transform: translateX(20px); }
+  .list-btn { display: flex; justify-content: space-between; width: 100%; padding: 16px 14px; background: none; border: 0;
+    border-top: 1px solid var(--line); font-size: 17px; text-align: left; }
+  .list-btn:first-child { border-top: 0; }
+  .list-btn span:last-child { color: var(--muted); }
+  .list-btn.selected { color: var(--brand); font-weight: 700; }
+  .stepper { display: flex; align-items: center; justify-content: center; gap: 28px; margin: 40px 0; }
+  .stepper button { width: 64px; height: 64px; border-radius: 50%; border: 1.5px solid var(--line); background: var(--surface); font-size: 30px; }
+  .stepper .num { font-size: 72px; font-weight: 800; min-width: 100px; text-align: center; }
+  .cal-title { font-size: 28px; font-weight: 800; margin: 8px 0 10px; }
+  .cal-body { font-size: 16px; line-height: 1.5; white-space: pre-line; }
+  .cal-timer { font-size: 110px; font-weight: 800; text-align: center; color: var(--brand); margin-top: 10px; }
+  .muted { color: var(--muted); }
+  .note { font-size: 14px; color: var(--muted); line-height: 1.45; padding: 4px 4px 0; }
+
+  /* The camera video: invisible during counting, small round preview during calibration */
+  #cam { position: fixed; left: 0; top: 0; width: 2px; height: 2px; opacity: 0.01; pointer-events: none; z-index: 0; }
+  #cam.preview { left: 50%; top: calc(env(safe-area-inset-top) + 64px); width: 110px; height: 110px; margin-left: -55px;
+    border-radius: 50%; object-fit: cover; opacity: 1; z-index: 20; transform: scaleX(-1); border: 3px solid var(--brand); }
+  .cal-preview-space { height: 120px; }
+  .toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 100px); transform: translateX(-50%);
+    background: #333; color: #fff; padding: 10px 16px; border-radius: 20px; font-size: 15px; z-index: 50; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: .95; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 30; display: grid; place-items: center; padding: 24px; }
+  .modal-bg[hidden] { display: none; }
+  .modal { background: var(--surface); border-radius: 18px; padding: 20px; max-width: 360px; width: 100%; }
+  .modal h3 { margin: 0 0 8px; font-size: 19px; }
+  .modal p { margin: 0 0 18px; color: var(--muted); line-height: 1.45; }
+  .modal .buttons .btn { height: 50px; font-size: 16px; }
+</style>
+</head>
+<body>
+<video id="cam" playsinline muted autoplay></video>
+<video id="keepawake" src="keepawake.mp4" playsinline muted loop style="position:fixed;width:1px;height:1px;opacity:0.01;pointer-events:none"></video>
+
+<div class="app">
+  <div class="topbar">
+    <button class="prayer-btn" id="btnPrayer"><span id="prayerLabel">Fajr · 2</span>
+      <svg width="24" height="24" viewBox="0 0 24 24"><path d="M7,10l5,5 5,-5z"/></svg></button>
+    <button class="icon-btn" id="btnSettings" aria-label="Settings">
+      <svg width="28" height="28" viewBox="0 0 24 24"><path d="M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94c0,-0.32 -0.02,-0.64 -0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87C2.62,9.08 2.66,9.34 2.86,9.48l2.03,1.58C4.84,11.36 4.8,11.69 4.8,12s0.02,0.64 0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61L19.14,12.94zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6s3.6,1.62 3.6,3.6S13.98,15.6 12,15.6z"/></svg>
+    </button>
+  </div>
+
+  <div class="center">
+    <div class="big" id="big">0</div>
+    <div class="target" id="target">of 2 rakaat</div>
+    <div class="state" id="state">Ready</div>
+    <div class="indicators">
+      <div class="ind" id="indRuku"><div class="dot" id="dotRuku"></div><span id="rukuLabel">Ruku</span></div>
+      <div class="ind"><div class="dots"><div class="dot" id="dotS1"></div><div class="dot" id="dotS2"></div></div><span>Sujood</span></div>
+    </div>
+    <div class="total" id="total">Total sujood: 0</div>
+  </div>
+
+  <div class="status" id="statusRow"><div class="status-dot" id="statusDot"></div><div class="status-text" id="statusText">Not started</div></div>
+  <div class="readout" id="readout" hidden></div>
+
+  <div class="spacer"></div>
+  <div class="buttons">
+    <button class="btn outline" id="btnReset">Reset</button>
+    <button class="btn primary" id="btnStart">Start</button>
+  </div>
+</div>
+
+<!-- Prayer picker -->
+<div class="sheet" id="prayerSheet" hidden>
+  <div class="sheet-head"><button class="icon-btn" data-close="prayerSheet" aria-label="Back"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z"/></svg></button><h2>Choose prayer</h2></div>
+  <div class="sheet-body" id="prayerList"></div>
+</div>
+
+<!-- Rakaat count picker -->
+<div class="sheet" id="countSheet" hidden>
+  <div class="sheet-head"><button class="icon-btn" data-close="countSheet" aria-label="Back"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z"/></svg></button><h2 id="countTitle">How many rakaat?</h2></div>
+  <div class="sheet-body">
+    <div class="stepper"><button id="countMinus">−</button><div class="num" id="countNum">2</div><button id="countPlus">+</button></div>
+  </div>
+  <div class="buttons"><button class="btn outline" data-close="countSheet">Cancel</button><button class="btn primary" id="countOk">OK</button></div>
+</div>
+
+<!-- Settings -->
+<div class="sheet" id="settingsSheet" hidden>
+  <div class="sheet-head"><button class="icon-btn" data-close="settingsSheet" aria-label="Back"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z"/></svg></button><h2>Settings</h2></div>
+  <div class="sheet-body">
+    <div class="group-title">Detection</div>
+    <div class="card">
+      <div class="row"><div class="label">Calibrate<small id="calStatus">Not calibrated</small></div><button class="btn primary" style="flex:none;height:40px;padding:0 18px;font-size:15px" id="btnCalibrate">Calibrate</button></div>
+      <div class="row" style="flex-wrap:wrap"><div class="label">Start delay: <b id="delayVal">5</b> s<small>Time to get into position (minimum 2 s, used to measure the room)</small></div>
+        <input type="range" min="2" max="15" step="1" id="setDelay"></div>
+      <div class="row"><div class="label">Light up my face<small>White screen while counting, so the camera can see you in a dark room</small></div><label class="switch"><input type="checkbox" id="setGlow"><span></span></label></div>
+    </div>
+    <div class="note">Uses the front camera. iPhones don't let websites read the light sensor, so there's no light sensor mode here.</div>
+
+    <div class="group-title">Status light</div>
+    <div class="card">
+      <div class="row"><div class="label">Show status light<small>Green = on track, yellow = unsure, red = possible wrong rakaat</small></div><label class="switch"><input type="checkbox" id="setStatus"><span></span></label></div>
+      <div class="row"><div class="label">Warn about suspected mistakes<small>Red if only 1 sujood is detected in a rakaat, or more rakaat than planned</small></div><label class="switch"><input type="checkbox" id="setWarn"><span></span></label></div>
+      <div class="row"><div class="label">If ruku isn't detected</div><select id="setMissedRuku"><option value="yellow">Show yellow</option><option value="ignore">Ignore</option></select></div>
+    </div>
+
+    <div class="group-title">When complete</div>
+    <div class="card">
+      <div class="row"><div class="label">Completion signal</div><select id="setComplete"><option value="show">Show only</option><option value="beep">Show + beep</option><option value="vibrate">Show + vibrate (Android)</option></select></div>
+    </div>
+
+    <div class="group-title">Appearance</div>
+    <div class="card">
+      <div class="row"><div class="label">Theme</div><select id="setTheme"><option value="system">Follow system</option><option value="light">Light</option><option value="dark">Dark</option></select></div>
+    </div>
+
+    <div class="group-title">Advanced</div>
+    <div class="card">
+      <div class="row"><div class="label">Show live sensor reading<small>Small diagnostic line, useful for checking detection</small></div><label class="switch"><input type="checkbox" id="setReadout"><span></span></label></div>
+    </div>
+    <div class="note" style="margin-top:18px">Tip: in Safari tap Share → <b>Add to Home Screen</b> to open it like an app.</div>
+  </div>
+</div>
+
+<!-- Calibration -->
+<div class="sheet" id="calSheet" hidden>
+  <div class="sheet-head"><button class="icon-btn" id="calBack" aria-label="Back"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z"/></svg></button><h2>Calibration</h2></div>
+  <div class="sheet-body">
+    <div class="cal-preview-space" id="calPreviewSpace" hidden></div>
+    <div class="cal-title" id="calTitle">Calibrate</div>
+    <div class="cal-body" id="calBody"></div>
+    <div class="cal-timer" id="calTimer"></div>
+  </div>
+  <div class="buttons"><button class="btn outline" id="calSecondary" hidden>Cancel</button><button class="btn primary" id="calMain">Begin</button></div>
+</div>
+
+<!-- Simple dialog -->
+<div class="modal-bg" id="modal" hidden>
+  <div class="modal"><h3 id="modalTitle"></h3><p id="modalText"></p>
+    <div class="buttons"><button class="btn outline" id="modalNo">Cancel</button><button class="btn primary" id="modalYes">OK</button></div></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="lib/face-api.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
